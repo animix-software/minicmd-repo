@@ -1,0 +1,22 @@
+{
+  "commands": [
+    {
+      "name": "ls",
+      "description": "Lista archivos y carpetas.",
+      "category": "legacy",
+      "entry": "main.py"
+    },
+    {
+      "name": "mkdir",
+      "description": "Crea carpetas.",
+      "category": "legacy",
+      "entry": "main.py"
+    },
+    {
+      "name": "rename",
+      "description": "Renombra archivos o carpetas.",
+      "category": "legacy",
+      "entry": "main.py"
+    }
+  ]
+}
