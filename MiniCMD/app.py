@@ -35,7 +35,7 @@ WEB.mkdir(exist_ok=True)
 LOGS.mkdir(exist_ok=True)
 
 SUDO_PASSWORD = "1234"
-GITHUB_RAW_BASE = "https://raw.githubusercontent.com/slendermantvb/minicmd-repo/main/commads"
+GITHUB_RAW_BASE = "https://raw.githubusercontent.com/animix-software/minicmd-repo/main/commads"
 
 BUILTINS = {"help", "cls", "sudo", "cd", "pwd", "history"}
 
@@ -115,7 +115,7 @@ def extract_description_from_code(code):
         if line.startswith("DESCRIPTION"):
             try:
                 _, right = line.split("=", 1)
-                return right.strip().strip('"').strip("'")
+                return right.strip().strip('\"').strip("'")
             except Exception:
                 return ""
 
