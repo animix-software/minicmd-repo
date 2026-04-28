@@ -1,6 +1,7 @@
 import shlex
 
 from .commands_system import run_system, HELP as SYSTEM_HELP
+from .commands_apt import run_apt
 from .commands_files import run_files
 from .commands_users import run_users
 from .legacy_runner import run_legacy
