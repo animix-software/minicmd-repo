@@ -28,6 +28,13 @@ def _allow_no_password(conn):
     return ip in ('127.0.0.1', '::1', None)
 
 
+def ensure_host_key():
+    if not HOST_KEY_FILE.exists():
+        key = asyncssh.generate_private_key('ssh-rsa')
+        HOST_KEY_FILE.write_text(key.export_private_key().decode('utf-8'), encoding='utf-8')
+    return str(HOST_KEY_FILE)
+
+
 class Server(asyncssh.SSHServer):
 
     def connection_made(self, conn):
@@ -37,15 +44,24 @@ class Server(asyncssh.SSHServer):
     def connection_lost(self, exc):
         if exc:
             log_error('server connection_lost', exc)
+        else:
+            log_event('server connection closed')
 
     def begin_auth(self, username):
-        if _allow_no_password(self.conn):
-            self.conn._minicmd_username = username or SSH_USER
-            return False
+        try:
+            if _allow_no_password(self.conn):
+                self.conn._minicmd_username = username or SSH_USER
+                log_event(f'auth bypass user={username or SSH_USER}')
+                return False
+        except Exception as e:
+            log_error('begin_auth crash', e)
         return True
 
     def password_auth_supported(self):
-        return not _allow_no_password(self.conn)
+        try:
+            return not _allow_no_password(self.conn)
+        except Exception:
+            return True
 
     def validate_password(self, username, password):
         try:
@@ -66,6 +82,7 @@ class Session(asyncssh.SSHServerSession):
         self.chan = None
         self.user = SSH_USER
         self.state = MiniCMDState(SSH_USER)
+        self._last_was_cr = False
 
     def connection_made(self, chan):
         self.chan = chan
@@ -77,49 +94,108 @@ class Session(asyncssh.SSHServerSession):
         self.state = MiniCMDState(self.user)
         log_event(f'session started user={self.user}')
 
+    def connection_lost(self, exc):
+        if exc:
+            log_error(f'session lost user={self.user}', exc)
+        else:
+            log_event(f'session closed user={self.user}')
+
+    def pty_requested(self, term_type, term_size, term_modes):
+        return True
+
     def shell_requested(self):
         return True
 
+    def exec_requested(self, command):
+        try:
+            out = run(command, self.state)
+            if out:
+                self.chan.write(out + ('\n' if not out.endswith('\n') else ''))
+            self.chan.exit(0)
+        except Exception as e:
+            log_error('exec_requested crash', e)
+            self.chan.write('Error interno\n')
+            self.chan.exit(1)
+        return True
+
     def session_started(self):
-        self.chan.write('MiniCMD SSH modular\n')
-        self.chan.write('Escribe help para ver comandos.\n')
-        self.prompt()
+        try:
+            self.chan.write('MiniCMD SSH modular\n')
+            self.chan.write('Escribe help para ver comandos.\n')
+            self.prompt()
+        except Exception as e:
+            log_error('session_started crash', e)
+            try:
+                self.chan.write('Error iniciando sesion\n')
+            except Exception:
+                pass
 
     def data_received(self, data, datatype):
         try:
             for c in data:
-                if c in ('\r', '\n'):
-                    self.chan.write('\n')
-                    out = run(self.buffer.strip(), self.state)
-                    if out:
-                        self.chan.write(out + ('\n' if not out.endswith('\n') else ''))
-                    self.buffer = ''
-                    if not self.state.running:
-                        self.chan.exit(0)
-                        return
-                    self.prompt()
-                elif c == '\x7f':
-                    if self.buffer:
-                        self.buffer = self.buffer[:-1]
-                        self.chan.write('\b \b')
-                elif c == '\x03':
-                    self.buffer = ''
-                    self.chan.write('^C\n')
-                    self.prompt()
+                if c == '\r':
+                    self._last_was_cr = True
+                    self._submit_line()
+                elif c == '\n':
+                    if self._last_was_cr:
+                        self._last_was_cr = False
+                        continue
+                    self._submit_line()
                 else:
-                    self.buffer += c
-                    self.chan.write(c)
+                    self._last_was_cr = False
+                    self._handle_char(c)
         except Exception as e:
             log_error('SSH crash', e)
-            self.chan.write('\nError interno\n')
+            try:
+                self.chan.write('\nError interno\n')
+                self.prompt()
+            except Exception:
+                pass
+
+    def _submit_line(self):
+        self.chan.write('\n')
+        line = self.buffer.strip()
+        self.buffer = ''
+        out = run(line, self.state)
+        if out:
+            self.chan.write(out + ('\n' if not out.endswith('\n') else ''))
+        if not self.state.running:
+            self.chan.exit(0)
+            return
+        self.prompt()
+
+    def _handle_char(self, c):
+        if c == '\x7f':
+            if self.buffer:
+                self.buffer = self.buffer[:-1]
+                self.chan.write('\b \b')
+        elif c == '\x03':
+            self.buffer = ''
+            self.chan.write('^C\n')
             self.prompt()
+        elif c == '\x04':
+            self.chan.write('\nCerrando sesion.\n')
+            self.chan.exit(0)
+        else:
+            self.buffer += c
+            self.chan.write(c)
+
+    def eof_received(self):
+        return False
 
     def prompt(self):
         self.chan.write(f'{self.user}@mini:{prompt_path(self.state)}$ ')
 
 
 async def _run():
-    await asyncssh.create_server(Server, SSH_HOST, SSH_PORT, session_factory=Session)
+    key_file = ensure_host_key()
+    await asyncssh.create_server(
+        Server,
+        SSH_HOST,
+        SSH_PORT,
+        server_host_keys=[key_file],
+        session_factory=Session,
+    )
     await asyncio.Future()
 
 
@@ -128,4 +204,5 @@ def start():
     print(f'Host: {SSH_HOST}')
     print(f'Puerto: {SSH_PORT}')
     print(f'No-password: {SSH_NO_PASSWORD} scope={SSH_NO_PASSWORD_SCOPE}')
+    print(f'Conectar: ssh {SSH_USER}@127.0.0.1 -p {SSH_PORT}')
     asyncio.run(_run())
