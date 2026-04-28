@@ -1,4 +1,4 @@
-from .ssh_server import start
+from .telnet_server import start
 
 
 if __name__ == '__main__':
