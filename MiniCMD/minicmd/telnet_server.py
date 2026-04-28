@@ -38,6 +38,18 @@ def allow_no_password(peer):
     return is_local(peer)
 
 
+def telnet_cmd(*items):
+    return bytes([IAC, *items])
+
+
+async def setup_telnet(writer):
+    # Deja el eco del lado del cliente para evitar letras duplicadas.
+    # Tambien activa suppress-go-ahead para una terminal mas limpia.
+    writer.write(telnet_cmd(WONT, ECHO))
+    writer.write(telnet_cmd(WILL, SUPPRESS_GO_AHEAD))
+    await writer.drain()
+
+
 def clean_telnet_bytes(data):
     out = bytearray()
     i = 0
@@ -54,8 +66,17 @@ def clean_telnet_bytes(data):
     return out.decode('utf-8', errors='replace')
 
 
-async def write(writer, text):
-    writer.write(str(text).replace('\n', '\r\n').encode('utf-8', errors='replace'))
+async def write(writer, text='', newline=True):
+    value = str(text)
+    if newline:
+        value += '\r\n'
+    value = value.replace('\n', '\r\n')
+    writer.write(value.encode('utf-8', errors='replace'))
+    await writer.drain()
+
+
+async def prompt_write(writer, text):
+    writer.write(str(text).encode('utf-8', errors='replace'))
     await writer.drain()
 
 
@@ -73,9 +94,7 @@ async def read_line(reader, writer, hidden=False):
             if ch == '\x7f' or ch == '\b':
                 if buf:
                     buf = buf[:-1]
-                    if not hidden:
-                        writer.write(b'\b \b')
-                        await writer.drain()
+                    # No hacemos eco aqui; el cliente Telnet ya lo maneja.
             elif ch == '\x03':
                 buf = ''
                 await write(writer, '^C')
@@ -83,9 +102,7 @@ async def read_line(reader, writer, hidden=False):
             else:
                 if len(buf) < MAX_LINE:
                     buf += ch
-                    if not hidden:
-                        writer.write(ch.encode('utf-8', errors='replace'))
-                        await writer.drain()
+                # No reenviar caracter: evita aaddmmiinn.
 
 
 async def login(reader, writer, peer):
@@ -93,11 +110,11 @@ async def login(reader, writer, peer):
         await write(writer, 'Modo sin password activado')
         return TELNET_USER
     await write(writer, 'MiniCMD Telnet login')
-    await write(writer, 'Usuario: ')
+    await prompt_write(writer, 'Usuario: ')
     user = await read_line(reader, writer)
     if user is None:
         return None
-    await write(writer, 'Password: ')
+    await prompt_write(writer, 'Password: ')
     secret = await read_line(reader, writer, hidden=True)
     if secret is None:
         return None
@@ -111,6 +128,7 @@ async def handle_client(reader, writer):
     peer = writer.get_extra_info('peername')
     log_event(f'telnet connection from {peer}')
     try:
+        await setup_telnet(writer)
         username = await login(reader, writer, peer)
         if not username:
             writer.close()
@@ -120,7 +138,7 @@ async def handle_client(reader, writer):
         await write(writer, 'MiniCMD Telnet modular')
         await write(writer, 'Escribe help para ver comandos.')
         while state.running:
-            await write(writer, f'{username}@mini:{prompt_path(state)}$ ')
+            await prompt_write(writer, f'{username}@mini:{prompt_path(state)}$ ')
             line = await read_line(reader, writer)
             if line is None:
                 break
