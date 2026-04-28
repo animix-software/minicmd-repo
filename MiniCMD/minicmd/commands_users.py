@@ -1,5 +1,6 @@
 from .permissions import is_admin
 from .users_store import load_users, save_users, user_info
+from .users_manage import add_account
 
 
 def run_users(cmd, args, state):
@@ -25,4 +26,12 @@ def run_users(cmd, args, state):
         users.setdefault('groups', {}).setdefault(args[0], [])
         save_users(users)
         return f'Grupo creado: {args[0]}'
+    if cmd == 'useradd':
+        if len(args) < 2:
+            return 'Uso: useradd <user> <pass> [grupo]'
+        if not is_admin(state, user_info):
+            return 'Solo admin/sudo puede crear usuarios.'
+        group = args[2] if len(args) > 2 else 'users'
+        ok, msg = add_account(args[0], args[1], group)
+        return msg
     return None
