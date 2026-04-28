@@ -8,6 +8,7 @@ from .commands_users import run_users
 from .legacy_runner import run_legacy
 from .state import MiniCMDState
 from .users_store import user_info, user_groups
+from .command_detector import normalize_command, detect_command, suggestion
 
 _DEFAULT_STATE = MiniCMDState()
 
@@ -37,33 +38,12 @@ def execute(command, state):
     cmd = parts[0].lower()
     args = parts[1:]
 
+    cmd, args, original = normalize_command(cmd, args)
+    cmd_type = detect_command(cmd)
+
     if cmd == 'help':
         base = run_system(cmd, args, state, user_info, user_groups)
-        extra = [
-            '',
-            'Archivos:',
-            '  ls [-l] [ruta], cd <ruta>, mkdir <dir>, touch <file>',
-            '  cat <file>, write <file> <texto>, append <file> <texto>',
-            '  rm <file>, rmdir <dir>, chmod 755 <ruta>, chown user[:group] <ruta>',
-            '',
-            'Usuarios:',
-            '  users, groups, groupadd <grupo>, useradd <user> <pass> [grupo]',
-            '',
-            'APT:',
-            '  apt list',
-            '  sudo 1234',
-            '  sudo apt install <comando>',
-            '',
-            'Chat relay:',
-            '  chat send <mensaje>',
-            '  chat send <canal> <mensaje>',
-            '  chat pull [canal], chat peek [canal], chat flush [canal]',
-            '  chat status',
-            '',
-            'Legacy:',
-            '  comandos en commads/<comando>/main.py funcionan igual',
-        ]
-        return base + '\n' + '\n'.join(extra)
+        return base
 
     try:
         for handler in (
@@ -81,7 +61,10 @@ def execute(command, state):
         if legacy is not None:
             return legacy
 
-        return f'Comando no encontrado: {cmd}'
+        if cmd_type == 'available':
+            return f'Comando disponible para instalar: sudo apt install {cmd}'
+
+        return suggestion(original)
 
     except PermissionError as e:
         return f'Permiso denegado: {e}'
