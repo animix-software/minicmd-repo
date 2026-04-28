@@ -2,6 +2,7 @@ import shlex
 
 from .commands_system import run_system, HELP as SYSTEM_HELP
 from .commands_apt import run_apt
+from .commands_chat import run_chat
 from .commands_files import run_files
 from .commands_users import run_users
 from .legacy_runner import run_legacy
@@ -53,6 +54,12 @@ def execute(command, state):
             '  sudo 1234',
             '  sudo apt install <comando>',
             '',
+            'Chat relay:',
+            '  chat send <mensaje>',
+            '  chat send <canal> <mensaje>',
+            '  chat pull [canal], chat peek [canal], chat flush [canal]',
+            '  chat status',
+            '',
             'Legacy:',
             '  comandos en commads/<comando>/main.py funcionan igual',
         ]
@@ -60,6 +67,7 @@ def execute(command, state):
 
     try:
         for handler in (
+            lambda: run_chat(cmd, args, state),
             lambda: run_apt(cmd, args, state),
             lambda: run_system(cmd, args, state, user_info, user_groups),
             lambda: run_users(cmd, args, state),
