@@ -44,6 +44,32 @@ def extract_description(code):
     return ''
 
 
+def classify_package(index_item=None, code=''):
+    # Regla MiniCMD:
+    # legacy = optimizado / liviano
+    # heavy = no optimizado / mas pesado
+    if isinstance(index_item, dict):
+        if index_item.get('heavy') is True:
+            return 'heavy', False
+        if index_item.get('optimized') is False:
+            return 'heavy', False
+        if str(index_item.get('type', '')).lower() in ['heavy', 'pesado', 'full']:
+            return 'heavy', False
+    marker = code.lower()
+    if 'minicmd_package_type = "heavy"' in marker or "minicmd_package_type = 'heavy'" in marker:
+        return 'heavy', False
+    return 'legacy', True
+
+
+def find_index_item(name):
+    for item in get_index():
+        if isinstance(item, str) and item.lower() == name:
+            return item
+        if isinstance(item, dict) and str(item.get('name', '')).lower() == name:
+            return item
+    return None
+
+
 def install_package(name):
     name = name.lower().strip()
     if not valid_name(name):
@@ -57,6 +83,9 @@ def install_package(name):
     except Exception as e:
         return False, f'Error descargando paquete: {e}'
 
+    index_item = find_index_item(name)
+    package_type, optimized = classify_package(index_item, code)
+
     folder = COMMADS / name
     folder.mkdir(parents=True, exist_ok=True)
     (folder / 'main.py').write_text(code, encoding='utf-8')
@@ -67,8 +96,10 @@ def install_package(name):
         'version': time.strftime('%Y-%m-%d'),
         'description': desc,
         'entry': 'main.py',
-        'category': 'apt',
-        'legacy': True,
+        'category': package_type,
+        'package_type': package_type,
+        'optimized': optimized,
+        'legacy': optimized,
         'updated_date': time.strftime('%Y-%m-%d')
     }
     (folder / 'manifest.json').write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding='utf-8')
@@ -82,11 +113,14 @@ def install_package(name):
         'description': desc,
         'version': manifest['version'],
         'entry': 'main.py',
-        'category': 'apt',
-        'legacy': True
+        'category': package_type,
+        'package_type': package_type,
+        'optimized': optimized,
+        'legacy': optimized
     }
     save_json(DB_FILE, db)
-    return True, f'Paquete instalado: {name}'
+    label = 'optimizado legacy' if optimized else 'pesado no optimizado'
+    return True, f'Paquete instalado: {name} [{label}]'
 
 
 def list_packages():
@@ -96,7 +130,10 @@ def list_packages():
     lines = ['Paquetes disponibles:']
     for item in items:
         if isinstance(item, str):
-            lines.append(f'  {item}')
+            lines.append(f'  {item:<12} [legacy/optimizado]')
         elif isinstance(item, dict):
-            lines.append(f"  {item.get('name','?'):<12} {item.get('description','')}")
+            name = item.get('name', '?')
+            package_type, optimized = classify_package(item, '')
+            label = 'legacy/optimizado' if optimized else 'heavy/pesado'
+            lines.append(f"  {name:<12} [{label}] {item.get('description','')}")
     return '\n'.join(lines)
